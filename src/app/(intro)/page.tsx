@@ -122,7 +122,7 @@ export default function Intro() {
   return (
     <div className="relative bg-black min-h-screen">
       <div className="fixed top-0 left-0 w-full z-50">
-        <Navbar />
+        <Navbar path="/login" />
       </div>
 
       <div className="scroll-indicator fixed bottom-10 left-1/2 -translate-x-1/2 z-40 flex flex-col items-center text-white/50 pointer-events-none">
