@@ -1,33 +1,46 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import Link from "next/link";
+import { loginSchema, LoginFormData } from "@/lib/validations";
+import { loginUser } from "@/lib/api/auth";
 
 export default function Login() {
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
+  const router = useRouter();
+  const [serverError, setServerError] = useState<string | null>(null);
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<LoginFormData>({
+    resolver: zodResolver(loginSchema),
+    mode: "onChange",
+  });
 
-  const handleLogin = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    console.log("Username:", username);
-    console.log("Password:", password);
+  const handleLogin = async (data: LoginFormData) => {
+    setServerError(null);
+    try {
+      await loginUser(data);
+      router.push("/main");
+    } catch (err) {
+      setServerError("อีเมลหรือรหัสผ่านไม่ถูกต้อง");
+    }
   };
 
   return (
-    // 1. เพิ่ม flex เข้าไป เพื่อให้ items-center และ justify-center ทำงานได้
     <div className="h-screen w-full flex items-center justify-center bg-black p-20">
-      
-      {/* 2. เปลี่ยน bg-primary เป็น primary (ตามชื่อคลาสใน CSS ของคุณ) 
-          และเพิ่ม w-full h-full เพื่อให้พื้นหลัง Gradient ยืดเต็มจอ 
-      */}
       <div className="grid grid-cols-[3fr_2fr] primary w-full h-full rounded-xl">
-        
+
         {/* ฝั่งซ้าย */}
         <div className="text-white text-center w-full h-full p-10">
           <img
             src="/04-save-data.jpg"
-            alt=""
+            alt="Login Cover"
             className="w-full h-full object-cover object-right rounded-xl shadow-xl shadow-white/20"
           />
         </div>
@@ -35,12 +48,11 @@ export default function Login() {
         {/* ฝั่งขวา (ฟอร์มล็อกอิน) */}
         <div className="bg-white px-10 pb-10 pt-6 rounded-xl shadow-xl shadow-black/20 place-self-center w-full max-w-[400px]">
           <form
-            onSubmit={handleLogin}
+            onSubmit={handleSubmit(handleLogin)}
             className="flex flex-col gap-4 text-black"
           >
             <h1 className="font-semibold drop-shadow-lg text-2xl sm:text-4xl uppercase">
               Welcome to{" "}
-              {/* ลบ text-blue-800 ออก เพราะคุณมี .gradient-text จัดการสีให้แล้ว */}
               <span className="gradient-text">Keep-pay</span>{" "}
               <br />
               pls login
@@ -48,16 +60,16 @@ export default function Login() {
 
             <div>
               <h2 className="text-sm font-medium mb-1 text-gray-700">
-                username
+                email
               </h2>
               <Input
-                name="username"
+                {...register("email")}
                 type="text"
-                required
                 className="rounded-xl border-gray-300"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
               />
+              {errors.email && (
+                <p className="text-red-500 text-xs mt-1">{errors.email.message}</p>
+              )}
             </div>
 
             <div>
@@ -65,22 +77,33 @@ export default function Login() {
                 password
               </h2>
               <Input
-                name="password"
+                {...register("password")}
                 type="password"
-                required
                 className="rounded-xl border-gray-300"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
               />
+              {errors.password && (
+                <p className="text-red-500 text-xs mt-1">{errors.password.message}</p>
+              )}
             </div>
+
+            {serverError && (
+              <p className="text-red-500 text-xs">{serverError}</p>
+            )}
 
             <Button
               type="submit"
+              disabled={isSubmitting}
               className="mt-4 w-full rounded-xl bg-black text-white hover:bg-gray-800"
             >
-              Login
+              {isSubmitting ? "Logging in..." : "Login"}
             </Button>
           </form>
+
+          <span className="text-sm font-medium text-gray-700">
+            If you don't have account pls click link{" "}
+            <Link href="/register" className="underline text-blue-500">here</Link>{" "}
+            to register
+          </span>
         </div>
       </div>
     </div>
