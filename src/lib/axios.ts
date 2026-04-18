@@ -1,5 +1,7 @@
 import axios from 'axios';
 
+const TOKEN_KEY = 'auth_token';
+
 const api = axios.create({
     baseURL: process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080',
     withCredentials: true,
@@ -8,5 +10,28 @@ const api = axios.create({
         'Content-Type': 'application/json',
     },
 })
+
+// แนบ Bearer token อัตโนมัติให้ทุก request
+api.interceptors.request.use((config) => {
+    if (typeof window !== 'undefined') {
+        const token = localStorage.getItem(TOKEN_KEY);
+        if (token) {
+            config.headers.Authorization = `Bearer ${token}`;
+        }
+    }
+    return config;
+});
+
+export const setAuthToken = (token: string) => {
+    if (typeof window !== 'undefined') {
+        localStorage.setItem(TOKEN_KEY, token);
+    }
+};
+
+export const clearAuthToken = () => {
+    if (typeof window !== 'undefined') {
+        localStorage.removeItem(TOKEN_KEY);
+    }
+};
 
 export default api

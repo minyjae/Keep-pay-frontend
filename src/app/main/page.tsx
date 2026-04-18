@@ -1,6 +1,8 @@
 "use client"
 
-import { useState, FormEvent, ChangeEvent } from "react"
+import { useEffect, useState, FormEvent, ChangeEvent } from "react"
+import { useRouter } from "next/navigation"
+import { AxiosError } from "axios"
 import { Button } from "@/components/ui/button"
 import {
   Field,
@@ -12,16 +14,45 @@ import {
   FieldSet,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-
-interface FormData {
-  title: string
-  price: number
-}
+import { getUser } from "@/lib/api/user"
+import { createList, getListUser } from "@/lib/api/list"
+import { clearAuthToken } from "@/lib/axios"
+import type { UserResponse } from "@/lib/types/user"
+import { ListResponse } from "@/lib/types/list"
 
 export default function FieldDemo() {
-  const [title, setTitle] = useState<string>("")
+  const router = useRouter()
+
+  // ---- user state ----
+  const [user, setUser] = useState<UserResponse | null>(null)
+  const [lists, setLists] = useState<ListResponse[] | null>(null)
+  const [loadingUser, setLoadingUser] = useState<boolean>(true)
+  const [userError, setUserError] = useState<string | null>(null)
+
+  // ---- form state ----
+  const [name, setName] = useState<string>("")
   const [price, setPrice] = useState<string>("")
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const fetchUser = async () => {
+      try {
+        const [data, list] = await Promise.all([getUser(), getListUser()])
+        setUser(data)
+        setLists(list)
+      } catch (err) {
+        if (err instanceof AxiosError && err.response?.status === 401) {
+          clearAuthToken()
+          router.push("/login")
+          return
+        }
+        setUserError("ไม่สามารถโหลดข้อมูลผู้ใช้ได้")
+      } finally {
+        setLoadingUser(false)
+      }
+    }
+    fetchUser()
+  }, [router])
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault()
@@ -33,29 +64,44 @@ export default function FieldDemo() {
       return
     }
 
-    const data: FormData = { title, price: priceAsNumber }
-    console.log("Submitting data:", data)
-
-    // ตัวอย่าง: reset form หลัง submit
-    setTitle("")
-    setPrice("")
+    try {
+      const newList = await createList({ name, price: priceAsNumber })
+      setLists((prev) => [...(prev ?? []), newList])
+      setName("")
+      setPrice("")
+    } catch (err) {
+      if (err instanceof AxiosError && err.response?.status === 401) {
+        clearAuthToken()
+        router.push("/login")
+        return
+      }
+      setError("ไม่สามารถบันทึกรายการได้")
+    }
   }
 
   const handleClear = (): void => {
-    setTitle("")
+    setName("")
     setPrice("")
     setError(null)
   }
 
+  if (loadingUser) {
+    return <div className="flex items-center justify-center p-12">กำลังโหลด...</div>
+  }
+
+  if (userError) {
+    return <div className="flex items-center justify-center p-12 text-red-600">{userError}</div>
+  }
+
   return (
-    <div className="flex items-center justify-center">
+    <div className="grid grid-cols-2 item-start">
       <form
         onSubmit={handleSubmit}
         className="w-full max-w-md mx-auto p-12"
       >
         <FieldGroup>
           <FieldSet>
-            <FieldLegend>รายรับ รายจ่าย</FieldLegend>
+            <FieldLegend>สวัสดี {user?.display_name}</FieldLegend>
             <FieldDescription>
               เก็บข้อมูลรายรับ-รายจ่ายในแต่ละวัน และสรุปเป็น dashboard ภาพรวม
             </FieldDescription>
@@ -63,13 +109,13 @@ export default function FieldDemo() {
             <FieldGroup>
               {/* Title field */}
               <Field>
-                <FieldLabel htmlFor="title">ชื่อรายการ</FieldLabel>
+                <FieldLabel htmlFor="name">ชื่อรายการ</FieldLabel>
                 <Input
-                  id="title"
+                  id="name"
                   type="text"
-                  value={title}
+                  value={name}
                   onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                    setTitle(e.target.value)
+                    setName(e.target.value)
                   }
                   placeholder="ตัวอย่าง: ซื้อมังงะ Chainsaw Man"
                   required
@@ -109,6 +155,28 @@ export default function FieldDemo() {
           </Field>
         </FieldGroup>
       </form>
+
+      <div className="p-12">
+        <h2 className="text-lg font-semibold mb-4">
+          รายการทั้งหมดของ {user?.display_name}
+        </h2>
+
+        {!lists || lists.length === 0 ? (
+          <p className="text-sm text-gray-500">ยังไม่มีรายการ</p>
+        ) : (
+          <ul className="space-y-2">
+            {lists.map((item) => (
+              <li
+                key={item.id}
+                className="flex justify-between items-center border rounded-lg px-4 py-3"
+              >
+                <span>{item.name}</span>
+                <span className="font-medium">{(item.price ?? 0).toLocaleString()} บาท</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   )
 }

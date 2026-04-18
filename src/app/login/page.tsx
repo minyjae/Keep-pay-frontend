@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { loginSchema, LoginFormData } from "@/lib/validations";
 import { loginUser } from "@/lib/api/auth";
+import { setAuthToken } from "@/lib/axios";
 
 export default function Login() {
   const router = useRouter();
@@ -25,7 +26,8 @@ export default function Login() {
   const handleLogin = async (data: LoginFormData) => {
     setServerError(null);
     try {
-      await loginUser(data);
+      const { token } = await loginUser(data);
+      setAuthToken(token);
       router.push("/main");
     } catch (err) {
       setServerError("อีเมลหรือรหัสผ่านไม่ถูกต้อง");
