@@ -122,7 +122,12 @@ export default function Intro() {
   return (
     <div className="relative bg-black min-h-screen">
       <div className="fixed top-0 left-0 w-full z-50">
-        <Navbar path="/login" />
+        <Navbar
+          buttons={[
+            { label: "Login", path: "/login", variant: "outline" },
+            { label: "Register", path: "/register", variant: "default" },
+          ]}
+        />
       </div>
 
       <div className="scroll-indicator fixed bottom-10 left-1/2 -translate-x-1/2 z-40 flex flex-col items-center text-white/50 pointer-events-none">
@@ -168,7 +173,7 @@ export default function Intro() {
 <section ref={horizontalRef} className="relative h-screen overflow-hidden border-b border-white/[0.06]">
         <div ref={horizontalTrackRef} className="flex h-full items-center gap-8 px-[10vw]" style={{ width: "fit-content" }}>
           {horizontalCards.map((card, i) => (
-            <div key={i} className={`flex-shrink-0 w-[80vw] sm:w-[45vw] h-[70vh] rounded-3xl border border-white/[0.08] bg-gradient-to-br ${card.color} backdrop-blur-xl p-12 flex flex-col justify-between`}>
+            <div key={i} className={`flex-shrink-0 w-[80vw] sm:w-[45vw] h-[70vh] rounded-3xl border border-white/[0.08] bg-gradient-to-br ${card.color} backdrop-blur-xl md:p-12 p-8 flex flex-col justify-between`}>
               <span className="text-7xl font-bold text-white">{card.num}</span>
               <div>
                 {card.img && (
@@ -179,8 +184,8 @@ export default function Intro() {
                   />
                 )}
                 
-                <h3 className="text-3xl sm:text-4xl font-bold text-white">{card.title}</h3>
-                <p className="mt-3 text-slate-300 text-lg max-w-md">{card.desc}</p>
+                <h3 className="md:text-3xl text-xl font-bold text-white">{card.title}</h3>
+                <p className="mt-3 text-slate-300 text-md max-w-md">{card.desc}</p>
               </div>
             </div>
           ))}
@@ -189,7 +194,6 @@ export default function Intro() {
 
 
       {/* พื้นที่สำหรับให้ไถลหน้าจอลงไปได้ */}
-      <div className="h-[150vh] bg-black" />
     </div>
   );
 }

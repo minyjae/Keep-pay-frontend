@@ -34,4 +34,11 @@ export const clearAuthToken = () => {
     }
 };
 
+export const getAuthToken = (): string | null => {
+    if (typeof window !== 'undefined') {
+        return localStorage.getItem(TOKEN_KEY);
+    }
+    return null;
+};
+
 export default api

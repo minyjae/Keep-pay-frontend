@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -9,11 +9,19 @@ import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { loginSchema, LoginFormData } from "@/lib/validations";
 import { loginUser } from "@/lib/api/auth";
-import { setAuthToken } from "@/lib/axios";
+import { setAuthToken, getAuthToken, clearAuthToken } from "@/lib/axios";
+import { getUser } from "@/lib/api/user";
 
 export default function Login() {
   const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!getAuthToken()) return;
+    getUser()
+      .then(() => router.replace("/main"))
+      .catch(() => clearAuthToken());
+  }, [router]);
   const {
     register,
     handleSubmit,
@@ -35,77 +43,88 @@ export default function Login() {
   };
 
   return (
-    <div className="h-screen w-full flex items-center justify-center bg-black p-20">
-      <div className="grid grid-cols-[3fr_2fr] primary w-full h-full rounded-xl">
+    <div className="h-screen w-full flex items-center justify-center bg-black p-8 lg:p-20">
+      <div className="grid grid-cols-1 lg:grid-cols-[3fr_2fr] w-full h-full max-h-[680px] rounded-2xl overflow-hidden shadow-2xl shadow-white/10">
 
-        {/* ฝั่งซ้าย */}
-        <div className="text-white text-center w-full h-full p-10">
+        {/* Left - Cover image */}
+        <div className="hidden lg:block relative">
           <img
             src="/04-save-data.jpg"
             alt="Login Cover"
-            className="w-full h-full object-cover object-right rounded-xl shadow-xl shadow-white/20"
+            className="w-full h-full object-cover object-right"
           />
+          <div className="absolute inset-0 bg-linear-to-r from-black/30 to-transparent" />
         </div>
 
-        {/* ฝั่งขวา (ฟอร์มล็อกอิน) */}
-        <div className="bg-white px-10 pb-10 pt-6 rounded-xl shadow-xl shadow-black/20 place-self-center w-full max-w-[400px]">
+        {/* Right - Login form */}
+        <div className="bg-white flex flex-col justify-center px-10 py-12">
+          <div className="mb-8">
+            <h1 className="font-bold text-3xl text-black tracking-tight leading-snug">
+              Welcome back to{" "}
+              <span className="gradient-text">Keep-pay</span>
+            </h1>
+            <p className="text-gray-400 text-sm mt-2">
+              Sign in to continue managing your finances
+            </p>
+          </div>
+
           <form
             onSubmit={handleSubmit(handleLogin)}
-            className="flex flex-col gap-4 text-black"
+            className="flex flex-col gap-5 text-black"
           >
-            <h1 className="font-semibold drop-shadow-lg text-2xl sm:text-4xl uppercase">
-              Welcome to{" "}
-              <span className="gradient-text">Keep-pay</span>{" "}
-              <br />
-              pls login
-            </h1>
-
-            <div>
-              <h2 className="text-sm font-medium mb-1 text-gray-700">
-                email
-              </h2>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-semibold text-gray-500 uppercase tracking-widest">
+                Email
+              </label>
               <Input
                 {...register("email")}
                 type="text"
-                className="rounded-xl border-gray-300"
+                placeholder="you@example.com"
+                className="rounded-lg border-gray-200 bg-gray-50 focus:bg-white h-11 transition-colors"
               />
               {errors.email && (
-                <p className="text-red-500 text-xs mt-1">{errors.email.message}</p>
+                <p className="text-red-500 text-xs">{errors.email.message}</p>
               )}
             </div>
 
-            <div>
-              <h2 className="text-sm font-medium mb-1 text-gray-700">
-                password
-              </h2>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-semibold text-gray-500 uppercase tracking-widest">
+                Password
+              </label>
               <Input
                 {...register("password")}
                 type="password"
-                className="rounded-xl border-gray-300"
+                placeholder="••••••••"
+                className="rounded-lg border-gray-200 bg-gray-50 focus:bg-white h-11 transition-colors"
               />
               {errors.password && (
-                <p className="text-red-500 text-xs mt-1">{errors.password.message}</p>
+                <p className="text-red-500 text-xs">{errors.password.message}</p>
               )}
             </div>
 
             {serverError && (
-              <p className="text-red-500 text-xs">{serverError}</p>
+              <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+                <p className="text-red-600 text-sm">{serverError}</p>
+              </div>
             )}
 
             <Button
               type="submit"
               disabled={isSubmitting}
-              className="mt-4 w-full rounded-xl bg-black text-white hover:bg-gray-800"
+              className="mt-2 w-full h-11 rounded-lg bg-black text-white hover:bg-gray-800 font-semibold tracking-wide transition-all"
             >
-              {isSubmitting ? "Logging in..." : "Login"}
+              {isSubmitting ? "Signing in..." : "Sign In"}
             </Button>
           </form>
 
-          <span className="text-sm font-medium text-gray-700">
-            If you don't have account pls click link{" "}
-            <Link href="/register" className="underline text-blue-500">here</Link>{" "}
-            to register
-          </span>
+          <div className="mt-8 pt-6 border-t border-gray-100 text-center">
+            <p className="text-sm text-gray-400">
+              Don&apos;t have an account?{" "}
+              <Link href="/register" className="font-semibold text-black hover:underline">
+                Create one
+              </Link>
+            </p>
+          </div>
         </div>
       </div>
     </div>

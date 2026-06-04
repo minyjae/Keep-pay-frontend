@@ -1,0 +1,392 @@
+# =====================================================================
+# FRONTEND CI/CD — Keep-pay Frontend (Next.js)
+# =====================================================================
+# Workflow นี้เทียบเท่ากับ frontend-bitbucket-pipeline.yml
+#
+# Flow ทั้งหมด:
+#   push code → install deps → build app → docker build → push ECR → Portainer webhook
+#
+# *** ความแตกต่างหลักจาก Bitbucket Pipeline ***
+#
+# Bitbucket Pipeline ต้นแบบมี 5 steps แยกกัน:
+#   Step 1: pnpm install              (artifacts: node_modules)
+#   Step 2: pnpm build                (artifacts: .output, .nuxt)
+#   Step 3: docker build → save .tar  (artifacts: image.tar)
+#   Step 4: docker load → tag → push ECR
+#   Step 5: curl Portainer webhook
+#
+# GitHub Actions ลดเหลือ 2 jobs:
+#   Job 1: npm ci + npm run build     (CI — ทดสอบว่า build ผ่าน)
+#   Job 2: docker build+push + webhook (CD — deploy)
+#
+# ทำไมลดได้?
+#   1. GitHub Actions: ทุก step ใน job เดียวใช้ VM เดียวกัน
+#      ไม่ต้อง save/load .tar ข้าม step (ประหยัดเวลา + storage)
+#   2. Dockerfile ทำ install + build อยู่แล้ว
+#      CI job ทดสอบว่า code build ผ่าน
+#      CD job ให้ Dockerfile ทำ install + build + package ใน image เลย
+#   3. docker/build-push-action ทำ build + tag + push ในคำสั่งเดียว
+# =====================================================================
+
+name: Frontend CI/CD
+
+# =====================================================================
+# TRIGGERS
+# =====================================================================
+# เทียบกับ Bitbucket:
+#   pipelines:
+#     branches:
+#       develop: ...        → push develop
+#       release/*: ...      → push release/**
+#     tags:
+#       prod-*: ...         → push tag prod-*
+# =====================================================================
+on:
+  push:
+    branches:
+      - develop
+      # push ไป develop → build + deploy ไป develop server
+      # เทียบกับ Bitbucket: pipelines.branches.develop
+
+      - 'release/**'
+      # push ไป release/1.0, release/2.0 → deploy ไป staging
+      # เทียบกับ Bitbucket: pipelines.branches.release/*
+      # *** GitHub ใช้ ** สำหรับ recursive match (ต่างจาก Bitbucket ที่ใช้ *) ***
+
+    tags:
+      - 'prod-*'
+      # สร้าง tag prod-1.0.0 → deploy ไป production
+      # เทียบกับ Bitbucket: pipelines.tags.prod-*
+
+  pull_request:
+    branches: [develop]
+    # เปิด PR เข้า develop → รันแค่ build-and-test (ไม่ deploy)
+    # Bitbucket Pipeline ไม่มี → เพิ่มเป็น best practice
+
+# =====================================================================
+# PERMISSIONS
+# =====================================================================
+permissions:
+  id-token: write
+  # อนุญาตให้ขอ OIDC token สำหรับ authenticate กับ AWS
+  # เทียบกับ Bitbucket: oidc: true ใน step
+  contents: read
+  # อนุญาตให้อ่าน source code
+
+# =====================================================================
+# ENVIRONMENT VARIABLES
+# =====================================================================
+env:
+  AWS_REGION: ap-southeast-1
+  # AWS Region ที่ ECR อยู่
+  # เทียบกับ Bitbucket: $AWS_REGION (Repository Variable)
+
+  NODE_VERSION: "22"
+  # Node.js version สำหรับ CI build step
+  #
+  # *** ทำไมใช้ "22" ไม่ใช่ "22.13.0"? ***
+  # ใน CI (GitHub Actions): ใช้ major version → ได้ latest patch อัตโนมัติ
+  #   เช่น "22" → ได้ 22.14.0 (ถ้ามี security patch ใหม่)
+  #   เหมาะกับ CI เพราะต้องการ security patches ล่าสุด
+  #
+  # ใน Dockerfile: ใช้ exact version → reproducible build
+  #   เช่น node:22.13.0-alpine → ทุกครั้งได้ผลเหมือนกัน
+  #   เหมาะกับ production เพราะต้องการ stability
+  #
+  # *** ทำไมใช้ "22" ไม่ใช่ "20" (เหมือน ci.yml เดิม)? ***
+  # 1. Bitbucket Pipeline ต้นแบบใช้ node:22.13.0-alpine → ต้องตรงกัน
+  # 2. Node 20 จะ End-of-Life เดือน April 2026 → ❌ หมดอายุแล้ว
+  # 3. Node 22 เป็น Active LTS → ✅ ได้ support ถึง April 2027
+  # 4. Next.js 16 รองรับ Node 22 → ✅ compatible
+  #
+  # *** วิธีเช็คว่าควรใช้ version ไหน ***
+  # 1. ดู framework: cat node_modules/next/package.json | jq '.engines'
+  #    → { "node": ">=18.18.0" } → Node 22 ✅ ผ่าน
+  # 2. ดู Bitbucket Pipeline: image: node:22.13.0-alpine → ใช้ 22
+  # 3. ดู Node.js releases: https://nodejs.org/en/about/previous-releases
+  #    → Node 22 = Active LTS (แนะนำ)
+  # 4. ทดสอบ: nvm use 22 && npm ci && npm run build → ✅ ผ่าน
+  #
+  # (ดูรายละเอียดเพิ่มเติมในขั้นตอนที่ 9 ของ DEVOPS-COMPLETE-GUIDE.md)
+
+# =====================================================================
+# JOBS
+# =====================================================================
+jobs:
+
+  # ===================================================================
+  # JOB 1: BUILD & TEST
+  # ===================================================================
+  # เทียบกับ Bitbucket Pipeline steps:
+  #   - step: &package-install    → npm ci
+  #     script:
+  #       - npm install -g pnpm@10.32.1
+  #       - pnpm install --frozen-lockfile
+  #
+  #   - step: &nuxt-build         → npm run build
+  #     script:
+  #       - npm install -g pnpm@10.32.1
+  #       - pnpm build
+  #
+  # *** Bitbucket แยก install กับ build เป็น 2 steps ***
+  # เพราะแต่ละ step ใช้ container คนละตัว
+  # ต้องใช้ artifacts ส่ง node_modules ข้าม step
+  #
+  # *** GitHub Actions รวมเป็น job เดียว ***
+  # เพราะทุก step ใน job ใช้ VM เดียวกัน
+  # node_modules อยู่ใน filesystem เดียวกัน ไม่ต้องส่งข้าม
+  # ===================================================================
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      # ดึงโค้ด
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ติดตั้ง Node.js + cache
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          # ใช้ Node version จาก env ด้านบน ("22")
+          # เทียบกับ Bitbucket: image: node:22.13.0-alpine
+
+          cache: "npm"
+          # cache node_modules ใน GitHub Actions cache
+          # ครั้งถัดไป npm ci ดึง packages จาก cache (เร็วขึ้น 50-70%)
+          # เทียบกับ Bitbucket: artifacts: [node_modules/**]
+          #
+          # *** ถ้าโปรเจคใช้ pnpm (เหมือน Bitbucket ต้นแบบ) ***
+          # เปลี่ยนเป็น cache: "pnpm"
+          # และเพิ่ม step ติดตั้ง pnpm ก่อน (ดู comment ด้านล่าง)
+
+      # ============================================================
+      # ถ้าโปรเจคใช้ pnpm (เหมือน Bitbucket Pipeline ต้นแบบ):
+      # ============================================================
+      # - name: Install pnpm
+      #   uses: pnpm/action-setup@v4
+      #   with:
+      #     version: 10.32.1
+      #     # ล็อค version เดียวกับ Bitbucket: npm install -g pnpm@10.32.1
+      #     # ใช้ action แทน npm install -g เพราะ:
+      #     #   1. เร็วกว่า (ไม่ต้อง download จาก npm)
+      #     #   2. setup cache ให้อัตโนมัติ
+      #
+      # - name: Install dependencies
+      #   run: pnpm install --frozen-lockfile
+      #   # --frozen-lockfile: ห้ามแก้ lockfile
+      #   # เทียบกับ Bitbucket: pnpm install --frozen-lockfile
+      # ============================================================
+
+      # ติดตั้ง dependencies
+      - name: Install dependencies
+        run: npm ci
+        # npm ci = "clean install"
+        #   - ลบ node_modules ก่อน install
+        #   - ใช้ version จาก package-lock.json เท่านั้น
+        #   - ถ้า lockfile ไม่ตรงกับ package.json → error
+        # เทียบกับ Bitbucket: pnpm install --frozen-lockfile
+        # ทั้งคู่เป็น "strict install" ที่ไม่แก้ lockfile
+
+      # Build application
+      - name: Build
+        run: npm run build
+        # Build Next.js → สร้าง .next/ directory
+        # เทียบกับ Bitbucket: pnpm build → สร้าง .output/ (Nuxt) หรือ .next/ (Next)
+        # ถ้า build fail → workflow fail → ไม่ไป deploy
+
+  # ===================================================================
+  # JOB 2: DOCKER BUILD → PUSH ECR → PORTAINER WEBHOOK
+  # ===================================================================
+  # เทียบกับ Bitbucket Pipeline (3 steps):
+  #
+  #   Step 1 — Build Image:
+  #     docker build -f Dockerfile --target release -t $REPO:latest .
+  #     docker save $REPO:latest > image.tar
+  #     → สร้าง Docker image แล้ว save เป็นไฟล์ .tar
+  #     → ต้อง save เพราะ step ถัดไปใช้ Docker daemon คนละตัว
+  #
+  #   Step 2 — Push Image:
+  #     docker load < image.tar
+  #     docker tag $REPO:latest $IMAGE_NAME:$IMAGE_TAG
+  #     pipe: atlassian/aws-ecr-push-image
+  #     → load image กลับมา → เปลี่ยน tag → push ไป ECR
+  #
+  #   Step 3 — Trigger Deploy:
+  #     curl -X POST "$PORTAINER_SERVICE_WEBHOOK_URL"
+  #     → เรียก Portainer ให้ pull image ใหม่แล้ว redeploy
+  #
+  # *** GitHub Actions ลดจาก 3 steps → ทำใน job เดียว ***
+  # ไม่ต้อง save/load .tar (ประหยัด 30-60 วินาที + storage)
+  # ===================================================================
+  deploy:
+    name: Build, Push ECR & Deploy
+    needs: build-and-test
+    # ต้องรอ build-and-test ผ่านก่อน
+
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    # รันเฉพาะเมื่อ push (ไม่รันตอน PR)
+
+    # ================================================================
+    # ENVIRONMENT
+    # ================================================================
+    # เทียบกับ Bitbucket:
+    #   develop:    deployment: develop
+    #   release/*:  deployment: stage
+    #   prod-*:     deployment: production
+    #
+    # GitHub Environments ตั้งค่าใน:
+    #   Repository → Settings → Environments
+    #
+    # *** production environment แนะนำตั้ง: ***
+    #   - Required reviewers: ต้องมีคน approve ก่อน deploy
+    #   - Wait timer: รอ 5 นาทีก่อน deploy (ให้เวลา cancel)
+    #   - Deployment branches: เฉพาะ tags เท่านั้น
+    # ================================================================
+    environment: >-
+      ${{
+        github.ref_name == 'develop' && 'develop' ||
+        startsWith(github.ref, 'refs/heads/release/') && 'staging' ||
+        startsWith(github.ref, 'refs/tags/prod-') && 'production' ||
+        'develop'
+      }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ================================================================
+      # กำหนด IMAGE_TAG ตาม branch/tag
+      # ================================================================
+      # เทียบกับ Bitbucket:
+      #   branch: export IMAGE_TAG=$BITBUCKET_DEPLOYMENT_ENVIRONMENT
+      #   tag:    export IMAGE_TAG=$BITBUCKET_DEPLOYMENT_ENVIRONMENT
+      #           (Bitbucket ใช้ deployment environment name สำหรับ tags ด้วย)
+      #
+      # *** สังเกต: Bitbucket Pipeline ต้นแบบ (frontend) ***
+      # ทั้ง deploy-by-branch และ deploy-by-tags ใช้:
+      #   export IMAGE_TAG=$BITBUCKET_DEPLOYMENT_ENVIRONMENT
+      # ไม่ได้ใช้ $BITBUCKET_TAG เหมือน backend
+      # ดังนั้น tag prod-1.0.0 → IMAGE_TAG = "production" (ไม่ใช่ "prod-1.0.0")
+      #
+      # ในที่นี้ทำเหมือน backend (ใช้ tag name) เพราะ descriptive กว่า
+      # ถ้าต้องการเหมือน Bitbucket frontend ทุกประการ
+      # เปลี่ยน tag case เป็น: echo "IMAGE_TAG=production"
+      # ================================================================
+      - name: Determine image tag
+        id: meta
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            # tag prod-1.0.0 → IMAGE_TAG = "prod-1.0.0"
+            echo "IMAGE_TAG=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.ref_name }}" == "develop" ]]; then
+            # branch develop → IMAGE_TAG = "develop"
+            echo "IMAGE_TAG=develop" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.ref_name }}" == release/* ]]; then
+            # branch release/* → IMAGE_TAG = "stage"
+            echo "IMAGE_TAG=stage" >> "$GITHUB_OUTPUT"
+          fi
+          echo "IMAGE_NAME=${{ github.event.repository.name }}" >> "$GITHUB_OUTPUT"
+
+      # Login AWS ด้วย OIDC
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+          # IAM Role ARN (เก็บใน GitHub Secrets)
+          # เทียบกับ Bitbucket: $AWS_OIDC_ROLE_ARN
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Login ECR
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+        # output: registry = 123456789.dkr.ecr.ap-southeast-1.amazonaws.com
+
+      # ติดตั้ง Docker Buildx
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        # Buildx รองรับ GitHub Actions cache (type=gha)
+        # เทียบกับ Bitbucket: export DOCKER_BUILDKIT=1
+
+      # ================================================================
+      # Build + Push Docker image ไป ECR
+      # ================================================================
+      # เทียบกับ Bitbucket (ทำแยก 2 steps + artifacts):
+      #
+      #   Step "Build Image":
+      #     docker build -f Dockerfile --target release -t $REPO:latest .
+      #     docker save $REPO:latest > image.tar
+      #     artifacts: [image.tar]
+      #
+      #   Step "Push Image":
+      #     docker load < image.tar
+      #     docker tag $REPO:latest $IMAGE_NAME:$IMAGE_TAG
+      #     pipe: aws-ecr-push-image
+      #
+      # GitHub Actions (ทำใน step เดียว):
+      #   docker/build-push-action → build + tag + push
+      #   *** ไม่ต้อง save/load .tar ***
+      #   *** ไม่ต้อง docker tag แยก ***
+      #   *** เร็วกว่า Bitbucket 30-60 วินาที ***
+      # ================================================================
+      - name: Build and push Docker image to ECR
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          # build context = directory ปัจจุบัน
+          # เทียบกับ Bitbucket: docker build ... .
+
+          push: true
+          # push ขึ้น ECR ทันทีหลัง build
+
+          tags: |
+            ${{ steps.ecr-login.outputs.registry }}/${{ steps.meta.outputs.IMAGE_NAME }}:${{ steps.meta.outputs.IMAGE_TAG }}
+          # เช่น: 123456789.dkr.ecr.ap-southeast-1.amazonaws.com/keep-pay-frontend:develop
+          # เทียบกับ Bitbucket:
+          #   docker tag $REPO:latest $IMAGE_NAME:$IMAGE_TAG
+          #   pipe: aws-ecr-push-image (IMAGE_NAME + TAGS)
+
+          build-args: |
+            BUILDKIT_INLINE_CACHE=1
+          # เก็บ cache metadata ใน image
+          # เทียบกับ Bitbucket: --build-arg BUILDKIT_INLINE_CACHE=1
+
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # GitHub Actions cache สำหรับ Docker layers
+          # *** ดีกว่า Bitbucket caches: [docker] ***
+          #   GitHub: per-layer cache, 10GB limit, LRU eviction
+          #   Bitbucket: whole daemon cache, ~1-2GB limit
+
+      # ================================================================
+      # เรียก Portainer Webhook
+      # ================================================================
+      # เทียบกับ Bitbucket:
+      #   - step: &trigger-deploy
+      #       script:
+      #         - apk add --no-cache curl     ← GitHub ไม่ต้อง (ubuntu มี curl)
+      #         - curl -X POST "$PORTAINER_SERVICE_WEBHOOK_URL"
+      #
+      # Portainer Webhook ทำงานอย่างไร:
+      #   1. Pipeline ส่ง HTTP POST ไปที่ webhook URL
+      #   2. Portainer รับ request → pull image ใหม่จาก ECR
+      #   3. Portainer หยุด container เก่า
+      #   4. Portainer สร้าง container ใหม่จาก image ใหม่
+      #   5. Container ใหม่เริ่มทำงาน → deployment เสร็จ
+      #
+      # PORTAINER_SERVICE_WEBHOOK_URL:
+      #   เก็บใน GitHub Environment Secrets
+      #   แต่ละ environment (develop/staging/production) มี URL ต่างกัน
+      #   เพราะชี้ไปคนละ Portainer service
+      # ================================================================
+      - name: Trigger Portainer Redeploy
+        run: |
+          echo "Calling Portainer webhook to redeploy..."
+          curl -sf -X POST "${{ secrets.PORTAINER_SERVICE_WEBHOOK_URL }}"
+          echo "Portainer webhook called successfully."
+        # -s = silent (ไม่แสดง progress)
+        # -f = fail on HTTP error (Bitbucket ไม่มี -f → ถ้า webhook fail จะไม่รู้)
