@@ -6,11 +6,12 @@ import { AxiosError } from "axios";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { getUser } from "@/lib/api/user";
-import { createList, getListUser } from "@/lib/api/list";
+import { createList, getListUser, updateList, deleteList } from "@/lib/api/list";
 import { clearAuthToken } from "@/lib/axios";
 import type { UserResponse } from "@/lib/types/user";
 import { ListResponse } from "@/lib/types/list";
 import Navbar from "@/components/navbar/navbar";
+import ConfirmModal from "@/components/ui/confirm-modal";
 
 export default function MainPage() {
   const router = useRouter();
@@ -24,11 +25,16 @@ export default function MainPage() {
   const [price, setPrice] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
 
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState<string>("");
+  const [editPrice, setEditPrice] = useState<string>("");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
   useEffect(() => {
     const fetchUser = async () => {
       try {
         const [data, list] = await Promise.all([getUser(), getListUser()]);
-        console.log('list', list)
+        console.log("list", list);
         setUser(data);
         setLists(list);
       } catch (err) {
@@ -76,6 +82,39 @@ export default function MainPage() {
     setError(null);
   };
 
+  const handleEdit = (item: ListResponse): void => {
+    setEditingId(item.id);
+    setEditName(item.name);
+    setEditPrice(String(item.price));
+  };
+
+  const handleUpdate = async (id: string): Promise<void> => {
+    const priceAsNumber = Number(editPrice);
+    if (isNaN(priceAsNumber)) return;
+    try {
+      const updated = await updateList({ id, name: editName, price: priceAsNumber });
+      setLists((prev) => prev?.map((item) => (item.id === id ? updated : item)) ?? null);
+      setEditingId(null);
+    } catch (err) {
+      if (err instanceof AxiosError && err.response?.status === 401) {
+        clearAuthToken();
+        router.push("/");
+      }
+    }
+  };
+
+  const handleDelete = async (id: string): Promise<void> => {
+    try {
+      await deleteList(id);
+      setLists((prev) => prev?.filter((item) => item.id !== id) ?? null);
+    } catch (err) {
+      if (err instanceof AxiosError && err.response?.status === 401) {
+        clearAuthToken();
+        router.push("/");
+      }
+    }
+  };
+
   if (loadingUser) {
     return (
       <div className="min-h-screen bg-black flex items-center justify-center">
@@ -99,11 +138,17 @@ export default function MainPage() {
   return (
     <div className="min-h-screen bg-black">
       <Navbar
-        buttons={[{ label: "Logout", path: "/", variant: "outline", onClick: clearAuthToken }]}
+        buttons={[
+          {
+            label: "Logout",
+            path: "/",
+            variant: "outline",
+            onClick: clearAuthToken,
+          },
+        ]}
       />
 
       <div className="max-w-5xl mx-auto px-6 py-10 grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
-
         {/* Left: Add form */}
         <div className="bg-white rounded-2xl p-8 shadow-xl shadow-white/5">
           <div className="mb-6">
@@ -125,7 +170,9 @@ export default function MainPage() {
                 id="name"
                 type="text"
                 value={name}
-                onChange={(e: ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
+                onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                  setName(e.target.value)
+                }
                 placeholder="เช่น ซื้อมังงะ Chainsaw Man"
                 className="rounded-lg border-gray-200 bg-gray-50 focus:bg-white h-11 transition-colors"
                 required
@@ -140,7 +187,9 @@ export default function MainPage() {
                 id="price"
                 type="number"
                 value={price}
-                onChange={(e: ChangeEvent<HTMLInputElement>) => setPrice(e.target.value)}
+                onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                  setPrice(e.target.value)
+                }
                 placeholder="0"
                 className="rounded-lg border-gray-200 bg-gray-50 focus:bg-white h-11 transition-colors"
                 required
@@ -174,15 +223,20 @@ export default function MainPage() {
 
         {/* Right: Summary + List */}
         <div className="flex flex-col gap-4">
-
           {/* Summary card */}
           <div className="bg-white/5 border border-white/10 rounded-2xl p-6 flex justify-between items-center">
             <div>
-              <p className="text-white/40 text-xs uppercase tracking-widest">รายการทั้งหมด</p>
-              <p className="text-white text-3xl font-bold mt-1">{lists?.length ?? 0}</p>
+              <p className="text-white/40 text-xs uppercase tracking-widest">
+                รายการทั้งหมด
+              </p>
+              <p className="text-white text-3xl font-bold mt-1">
+                {lists?.length ?? 0}
+              </p>
             </div>
             <div className="text-right">
-              <p className="text-white/40 text-xs uppercase tracking-widest">ยอดรวม</p>
+              <p className="text-white/40 text-xs uppercase tracking-widest">
+                ยอดรวม
+              </p>
               <p className="text-white text-3xl font-bold mt-1">
                 {total.toLocaleString()}{" "}
                 <span className="text-white/40 text-base font-normal">บาท</span>
@@ -200,30 +254,109 @@ export default function MainPage() {
               lists.map((item, index) => (
                 <div
                   key={item.id}
-                  className="bg-white/5 border border-white/10 rounded-xl px-5 py-4 flex justify-between items-center hover:bg-white/10 transition-colors"
+                  className="bg-white/5 border border-white/10 rounded-xl p-4 flex flex-col gap-3 hover:bg-white/8 hover:border-white/20 transition-all"
                 >
-                  <div className="flex items-center gap-3">
-                    <span className="text-white/20 text-xs w-5 text-right tabular-nums">
-                      {index + 1}
-                    </span>
-                    <span className="text-white text-sm">{item.name}</span>
+                  {/* แถวบน: ลำดับ + ชื่อ + ราคา */}
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <span className="text-white/20 text-xs tabular-nums shrink-0">
+                        {index + 1}
+                      </span>
+                      {editingId === item.id ? (
+                        <Input
+                          autoFocus
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          className="h-8 text-sm bg-white/10 border-white/20 text-white rounded-lg flex-1"
+                        />
+                      ) : (
+                        <span className="text-white font-medium text-sm truncate">
+                          {item.name}
+                        </span>
+                      )}
+                    </div>
+                    {editingId === item.id ? (
+                      <Input
+                        type="number"
+                        value={editPrice}
+                        onChange={(e) => setEditPrice(e.target.value)}
+                        className="h-8 text-sm bg-white/10 border-white/20 text-white rounded-lg w-24 text-right"
+                      />
+                    ) : (
+                      <span className="text-white font-bold text-base tabular-nums shrink-0">
+                        {(item.price ?? 0).toLocaleString()}
+                        <span className="text-white/40 text-xs font-normal ml-1">บาท</span>
+                      </span>
+                    )}
                   </div>
-                  <span className="text-white font-semibold text-sm tabular-nums">
-                    {(item.price ?? 0).toLocaleString()} บาท
-                  </span>
-                  <span className="text-white/40 text-xs">
-                    {new Date(item.created_at).toLocaleString("th-TH", {
-                      dateStyle: "medium",
-                      timeStyle: "short",
-                    })}
-                  </span>
+
+                  {/* แถวล่าง: วันที่ + ปุ่ม */}
+                  <div className="flex items-center justify-between">
+                    <span className="text-white/30 text-xs">
+                      {new Date(item.created_at).toLocaleString("th-TH", {
+                        dateStyle: "medium",
+                        timeStyle: "short",
+                      })}
+                    </span>
+                    <div className="flex gap-1.5">
+                      {editingId === item.id ? (
+                        <>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-xs h-7 px-3 rounded-lg text-white/50 hover:text-white hover:bg-white/10"
+                            onClick={() => setEditingId(null)}
+                          >
+                            ยกเลิก
+                          </Button>
+                          <Button
+                            size="sm"
+                            className="text-xs h-7 px-3 rounded-lg bg-white text-black hover:bg-white/90"
+                            onClick={() => handleUpdate(item.id)}
+                          >
+                            บันทึก
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-xs h-7 px-3 rounded-lg text-white/50 hover:text-white hover:bg-white/10"
+                            onClick={() => handleEdit(item)}
+                          >
+                            แก้ไข
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-xs h-7 px-3 rounded-lg text-red-400/60 hover:text-red-400 hover:bg-red-500/10"
+                            onClick={() => setDeletingId(item.id)}
+                          >
+                            ลบ
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </div>
                 </div>
               ))
             )}
           </div>
-
         </div>
       </div>
+
+      <ConfirmModal
+        open={deletingId !== null}
+        title="ยืนยันการลบรายการ"
+        description={`"${lists?.find((i) => i.id === deletingId)?.name}" จะถูกลบและไม่สามารถกู้คืนได้`}
+        confirmLabel="ลบ"
+        onConfirm={async () => {
+          if (deletingId) await handleDelete(deletingId);
+          setDeletingId(null);
+        }}
+        onCancel={() => setDeletingId(null)}
+      />
     </div>
   );
 }
