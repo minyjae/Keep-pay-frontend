@@ -6,10 +6,19 @@ import { AxiosError } from "axios";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { getUser } from "@/lib/api/user";
-import { createList, getListUser, updateList, deleteList } from "@/lib/api/list";
+import { createList, getListUser, updateList, deleteList, getSummary } from "@/lib/api/list";
+import { getTypes } from "@/lib/api/type";
 import { clearAuthToken } from "@/lib/axios";
 import type { UserResponse } from "@/lib/types/user";
-import { ListResponse } from "@/lib/types/list";
+import { ListResponse, ListSummary } from "@/lib/types/list";
+import type { TypeResponse } from "@/lib/types/type";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import Navbar from "@/components/navbar/navbar";
 import ConfirmModal from "@/components/ui/confirm-modal";
 
@@ -18,25 +27,36 @@ export default function MainPage() {
 
   const [user, setUser] = useState<UserResponse | null>(null);
   const [lists, setLists] = useState<ListResponse[] | null>(null);
+  const [summary, setSummary] = useState<ListSummary>({ income: 0, expend: 0, balance: 0 });
   const [loadingUser, setLoadingUser] = useState<boolean>(true);
   const [userError, setUserError] = useState<string | null>(null);
 
+  const [types, setTypes] = useState<TypeResponse[]>([]);
   const [name, setName] = useState<string>("");
   const [price, setPrice] = useState<string>("");
+  const [typeId, setTypeId] = useState<string>("");
+  const [time, setTime] = useState<string>(() => {
+    const now = new Date();
+    return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  });
   const [error, setError] = useState<string | null>(null);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState<string>("");
   const [editPrice, setEditPrice] = useState<string>("");
+  const [editTime, setEditTime] = useState<string>("");
+  const [editTypeId, setEditTypeId] = useState<string>("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchUser = async () => {
       try {
-        const [data, list] = await Promise.all([getUser(), getListUser()]);
-        console.log("list", list);
+        const [data, list, typeList, summaryData] = await Promise.all([getUser(), getListUser(), getTypes(), getSummary()]);
         setUser(data);
         setLists(list);
+        setTypes(typeList);
+        setSummary(summaryData);
+        if (typeList.length > 0) setTypeId(typeList[0].id);
       } catch (err) {
         if (err instanceof AxiosError && err.response?.status === 401) {
           clearAuthToken();
@@ -51,6 +71,10 @@ export default function MainPage() {
     fetchUser();
   }, [router]);
 
+  const refreshSummary = (): void => {
+    getSummary().then(setSummary).catch(() => {});
+  };
+
   const handleSubmit = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
     setError(null);
@@ -60,10 +84,21 @@ export default function MainPage() {
       setError("กรุณาใส่จำนวนเงินที่ถูกต้อง");
       return;
     }
+    if (!typeId) {
+      setError("กรุณาเลือกประเภทรายการ");
+      return;
+    }
 
     try {
-      const newList = await createList({ name, price: priceAsNumber });
+      const currentTime = time || `${String(new Date().getHours()).padStart(2, "0")}:${String(new Date().getMinutes()).padStart(2, "0")}`;
+      const today = new Date().toISOString().split("T")[0];
+      const date = new Date(`${today}T${currentTime}:00`).toISOString();
+
+      console.log("[create] payload:", { name, price: priceAsNumber, date, type_id: typeId });
+
+      const newList = await createList({ name, price: priceAsNumber, date, type_id: typeId });
       setLists((prev) => [...(prev ?? []), newList]);
+      refreshSummary();
       setName("");
       setPrice("");
     } catch (err) {
@@ -79,6 +114,8 @@ export default function MainPage() {
   const handleClear = (): void => {
     setName("");
     setPrice("");
+    setTime(`${String(new Date().getHours()).padStart(2, "0")}:00`);
+    setTypeId(types[0]?.id ?? "");
     setError(null);
   };
 
@@ -86,14 +123,20 @@ export default function MainPage() {
     setEditingId(item.id);
     setEditName(item.name);
     setEditPrice(String(item.price));
+    setEditTypeId(item.type?.id ?? "");
+    const d = new Date(item.date);
+    setEditTime(`${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`);
   };
 
   const handleUpdate = async (id: string): Promise<void> => {
     const priceAsNumber = Number(editPrice);
     if (isNaN(priceAsNumber)) return;
     try {
-      const updated = await updateList({ id, name: editName, price: priceAsNumber });
+      const today = new Date().toISOString().split("T")[0];
+      const date = new Date(`${today}T${editTime}:00`).toISOString();
+      const updated = await updateList({ id, name: editName, price: priceAsNumber, date });
       setLists((prev) => prev?.map((item) => (item.id === id ? updated : item)) ?? null);
+      refreshSummary();
       setEditingId(null);
     } catch (err) {
       if (err instanceof AxiosError && err.response?.status === 401) {
@@ -107,6 +150,7 @@ export default function MainPage() {
     try {
       await deleteList(id);
       setLists((prev) => prev?.filter((item) => item.id !== id) ?? null);
+      refreshSummary();
     } catch (err) {
       if (err instanceof AxiosError && err.response?.status === 401) {
         clearAuthToken();
@@ -132,8 +176,6 @@ export default function MainPage() {
       </div>
     );
   }
-
-  const total = lists?.reduce((sum, item) => sum + (item.price ?? 0), 0) ?? 0;
 
   return (
     <div className="min-h-screen bg-black">
@@ -196,6 +238,38 @@ export default function MainPage() {
               />
             </div>
 
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-semibold text-gray-500 uppercase tracking-widest">
+                เวลา
+              </label>
+              <Input
+                id="time"
+                type="time"
+                value={time}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => setTime(e.target.value)}
+                className="rounded-lg border-gray-200 bg-gray-50 focus:bg-white h-11 transition-colors"
+                required
+              />
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-semibold text-gray-500 uppercase tracking-widest">
+                ประเภท
+              </label>
+              <Select value={typeId} onValueChange={setTypeId}>
+                <SelectTrigger className="h-11 rounded-lg bg-gray-50 border-gray-200">
+                  <SelectValue placeholder="เลือกประเภท" />
+                </SelectTrigger>
+                <SelectContent>
+                  {types.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
             {error && (
               <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3">
                 <p className="text-red-600 text-sm">{error}</p>
@@ -224,22 +298,30 @@ export default function MainPage() {
         {/* Right: Summary + List */}
         <div className="flex flex-col gap-4">
           {/* Summary card */}
-          <div className="bg-white/5 border border-white/10 rounded-2xl p-6 flex justify-between items-center">
+          <div className="bg-white/5 border border-white/10 rounded-2xl p-6 grid grid-cols-2 gap-4">
             <div>
-              <p className="text-white/40 text-xs uppercase tracking-widest">
-                รายการทั้งหมด
+              <p className="text-white/40 text-xs uppercase tracking-widest">รายการทั้งหมด</p>
+              <p className="text-white text-3xl font-bold mt-1">{lists?.length ?? 0}</p>
+            </div>
+            <div className="text-right">
+              <p className="text-emerald-400/70 text-xs uppercase tracking-widest">Income</p>
+              <p className="text-emerald-400 text-2xl font-bold mt-1">
+                +{summary.income.toLocaleString()}
+                <span className="text-emerald-400/50 text-xs font-normal ml-1">บาท</span>
               </p>
-              <p className="text-white text-3xl font-bold mt-1">
-                {lists?.length ?? 0}
+            </div>
+            <div>
+              <p className="text-red-400/70 text-xs uppercase tracking-widest">Expend</p>
+              <p className="text-red-400 text-2xl font-bold mt-1">
+                -{summary.expend.toLocaleString()}
+                <span className="text-red-400/50 text-xs font-normal ml-1">บาท</span>
               </p>
             </div>
             <div className="text-right">
-              <p className="text-white/40 text-xs uppercase tracking-widest">
-                ยอดรวม
-              </p>
-              <p className="text-white text-3xl font-bold mt-1">
-                {total.toLocaleString()}{" "}
-                <span className="text-white/40 text-base font-normal">บาท</span>
+              <p className="text-white/40 text-xs uppercase tracking-widest">คงเหลือ</p>
+              <p className={`text-2xl font-bold mt-1 ${summary.balance >= 0 ? "text-white" : "text-red-400"}`}>
+                {summary.balance >= 0 ? "+" : ""}{summary.balance.toLocaleString()}
+                <span className="text-white/40 text-xs font-normal ml-1">บาท</span>
               </p>
             </div>
           </div>
@@ -290,14 +372,42 @@ export default function MainPage() {
                     )}
                   </div>
 
-                  {/* แถวล่าง: วันที่ + ปุ่ม */}
+                  {/* แถวล่าง: วันที่ + type + ปุ่ม */}
                   <div className="flex items-center justify-between">
-                    <span className="text-white/30 text-xs">
-                      {new Date(item.created_at).toLocaleString("th-TH", {
-                        dateStyle: "medium",
-                        timeStyle: "short",
-                      })}
-                    </span>
+                    {editingId === item.id ? (
+                      <div className="flex gap-2 flex-1 mr-2">
+                        <Input
+                          type="time"
+                          value={editTime}
+                          onChange={(e) => setEditTime(e.target.value)}
+                          className="h-7 text-xs bg-white/10 border-white/20 text-white rounded-lg flex-1"
+                        />
+                        <Select value={editTypeId} onValueChange={setEditTypeId}>
+                          <SelectTrigger className="h-7! min-h-0 text-xs bg-white/10 border-white/20 text-white rounded-lg flex-1 py-0">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {types.map((t) => (
+                              <SelectItem key={t.id} value={t.id}>
+                                {t.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <span className="text-white/30 text-xs">
+                          {new Date(item.date).toLocaleString("th-TH", {
+                            dateStyle: "medium",
+                            timeStyle: "short",
+                          })}
+                        </span>
+                        <span className={`text-xs px-1.5 py-0.5 rounded-md font-medium ${item.type?.name === "income" ? "bg-emerald-500/20 text-emerald-400" : "bg-red-500/20 text-red-400"}`}>
+                          {item.type?.name ?? "-"}
+                        </span>
+                      </div>
+                    )}
                     <div className="flex gap-1.5">
                       {editingId === item.id ? (
                         <>
