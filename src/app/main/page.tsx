@@ -6,7 +6,7 @@ import { AxiosError } from "axios";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { getUser } from "@/lib/api/user";
-import { createList, getListUser, updateList, deleteList, getSummary, getWeekSummary, getMonthSummary } from "@/lib/api/list";
+import { createList, getListUser, updateList, deleteList, getSummary } from "@/lib/api/list";
 import { getTypes } from "@/lib/api/type";
 import { clearAuthToken } from "@/lib/axios";
 import type { UserResponse } from "@/lib/types/user";
@@ -28,9 +28,6 @@ export default function MainPage() {
   const [user, setUser] = useState<UserResponse | null>(null);
   const [lists, setLists] = useState<ListResponse[] | null>(null);
   const [summary, setSummary] = useState<ListSummary>({ income: 0, expend: 0, balance: 0 });
-  const [weekSummary, setWeekSummary] = useState<ListSummary>({ income: 0, expend: 0, balance: 0 });
-  const [monthSummary, setMonthSummary] = useState<ListSummary>({ income: 0, expend: 0, balance: 0 });
-  const [period, setPeriod] = useState<"all" | "week" | "month">("all");
   const [loadingUser, setLoadingUser] = useState<boolean>(true);
   const [userError, setUserError] = useState<string | null>(null);
 
@@ -51,17 +48,30 @@ export default function MainPage() {
   const [editTypeId, setEditTypeId] = useState<string>("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
+  // ตัวกรองวันที่ (0 = ทั้งหมด)
+  const now = new Date();
+  const [filterYear, setFilterYear] = useState<number>(now.getFullYear());
+  const [filterMonth, setFilterMonth] = useState<number>(now.getMonth() + 1);
+  const [filterDay, setFilterDay] = useState<number>(0);
+
+  // pagination (mobile) + responsive
+  const [page, setPage] = useState<number>(0);
+  const [isMobile, setIsMobile] = useState<boolean>(false);
+
   useEffect(() => {
-    const fetchUser = async () => {
+    const mq = window.matchMedia("(max-width: 1023px)");
+    const update = () => setIsMobile(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
+
+  useEffect(() => {
+    const fetchInitial = async () => {
       try {
-        const [data, list, typeList, summaryData, summaryWeekData, summaryMonthData] = await Promise.all([getUser(), getListUser(), getTypes(), getSummary(), getWeekSummary(), getMonthSummary()]);
+        const [data, typeList] = await Promise.all([getUser(), getTypes()]);
         setUser(data);
-        setLists(list);
         setTypes(typeList);
-        setSummary(summaryData);
-        setWeekSummary(summaryWeekData);
-        setMonthSummary(summaryMonthData);
-        console.log("summary all:", summaryData, "week:", summaryWeekData, "month:", summaryMonthData);
         if (typeList.length > 0) setTypeId(typeList[0].id);
       } catch (err) {
         if (err instanceof AxiosError && err.response?.status === 401) {
@@ -74,13 +84,30 @@ export default function MainPage() {
         setLoadingUser(false);
       }
     };
-    fetchUser();
+    fetchInitial();
   }, [router]);
 
-  const refreshSummary = (): void => {
-    getSummary().then(setSummary).catch(() => {});
-    getWeekSummary().then(setWeekSummary).catch(() => {});
-    getMonthSummary().then(setMonthSummary).catch(() => {});
+  // โหลด list + summary ใหม่ทุกครั้งที่ตัวกรองวันที่เปลี่ยน
+  useEffect(() => {
+    const filter = { year: filterYear, month: filterMonth, day: filterDay || undefined };
+    getListUser(filter)
+      .then((list) => {
+        setLists(list);
+        setPage(0);
+      })
+      .catch((err) => {
+        if (err instanceof AxiosError && err.response?.status === 401) {
+          clearAuthToken();
+          router.push("/");
+        }
+      });
+    getSummary(filter).then(setSummary).catch(() => {});
+  }, [filterYear, filterMonth, filterDay, router]);
+
+  const reloadLists = (): void => {
+    const filter = { year: filterYear, month: filterMonth, day: filterDay || undefined };
+    getListUser(filter).then(setLists).catch(() => {});
+    getSummary(filter).then(setSummary).catch(() => {});
   };
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
@@ -102,11 +129,8 @@ export default function MainPage() {
       const today = new Date().toISOString().split("T")[0];
       const date = new Date(`${today}T${currentTime}:00`).toISOString();
 
-      console.log("[create] payload:", { name, price: priceAsNumber, date, type_id: typeId });
-
-      const newList = await createList({ name, price: priceAsNumber, date, type_id: typeId });
-      setLists((prev) => [...(prev ?? []), newList]);
-      refreshSummary();
+      await createList({ name, price: priceAsNumber, date, type_id: typeId });
+      reloadLists();
       setName("");
       setPrice("");
     } catch (err) {
@@ -142,9 +166,8 @@ export default function MainPage() {
     try {
       const today = new Date().toISOString().split("T")[0];
       const date = new Date(`${today}T${editTime}:00`).toISOString();
-      const updated = await updateList({ id, name: editName, price: priceAsNumber, date });
-      setLists((prev) => prev?.map((item) => (item.id === id ? updated : item)) ?? null);
-      refreshSummary();
+      await updateList({ id, name: editName, price: priceAsNumber, date });
+      reloadLists();
       setEditingId(null);
     } catch (err) {
       if (err instanceof AxiosError && err.response?.status === 401) {
@@ -157,8 +180,7 @@ export default function MainPage() {
   const handleDelete = async (id: string): Promise<void> => {
     try {
       await deleteList(id);
-      setLists((prev) => prev?.filter((item) => item.id !== id) ?? null);
-      refreshSummary();
+      reloadLists();
     } catch (err) {
       if (err instanceof AxiosError && err.response?.status === 401) {
         clearAuthToken();
@@ -185,8 +207,20 @@ export default function MainPage() {
     );
   }
 
-  const activeSummary =
-    period === "week" ? weekSummary : period === "month" ? monthSummary : summary;
+  // ตัวเลือกของ dropdown
+  const currentYear = new Date().getFullYear();
+  const yearOptions = Array.from({ length: 6 }, (_, i) => currentYear - i);
+  const monthNames = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+  const daysInMonth = new Date(filterYear, filterMonth, 0).getDate();
+  const dayOptions = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+
+  // pagination: mobile แสดงสูงสุด 10/หน้า, desktop แสดงทั้งหมด (เลื่อน scroll)
+  const allLists = lists ?? [];
+  const pageSize = 10;
+  const totalPages = isMobile ? Math.ceil(allLists.length / pageSize) : 1;
+  const visibleLists = isMobile
+    ? allLists.slice(page * pageSize, page * pageSize + pageSize)
+    : allLists;
 
   return (
     <div className="min-h-screen bg-black">
@@ -307,26 +341,50 @@ export default function MainPage() {
         </div>
 
         {/* Right: Summary + List */}
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-2">
+          {/* ตัวกรองวันที่ */}
           <div className="flex gap-2">
-            {([
-              { key: "all", label: "ทั้งหมด" },
-              { key: "week", label: "สัปดาห์" },
-              { key: "month", label: "เดือน" },
-            ] as const).map((opt) => (
-              <button
-                key={opt.key}
-                onClick={() => setPeriod(opt.key)}
-                className={`text-sm px-4 py-1.5 rounded-lg border transition-colors ${
-                  period === opt.key
-                    ? "bg-white text-black border-white font-semibold"
-                    : "text-white/60 border-white/20 hover:bg-white/10"
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
+            <Select value={String(filterDay)} onValueChange={(v) => setFilterDay(Number(v))}>
+              <SelectTrigger className="h-9 text-sm bg-white/5 border-white/20 text-white rounded-lg flex-1">
+                <SelectValue placeholder="วัน" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="0">ทั้งเดือน</SelectItem>
+                {dayOptions.map((d) => (
+                  <SelectItem key={d} value={String(d)}>
+                    {d}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={String(filterMonth)} onValueChange={(v) => setFilterMonth(Number(v))}>
+              <SelectTrigger className="h-9 text-sm bg-white/5 border-white/20 text-white rounded-lg flex-1">
+                <SelectValue placeholder="เดือน" />
+              </SelectTrigger>
+              <SelectContent>
+                {monthNames.map((m, i) => (
+                  <SelectItem key={i} value={String(i + 1)}>
+                    {m}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={String(filterYear)} onValueChange={(v) => setFilterYear(Number(v))}>
+              <SelectTrigger className="h-9 text-sm bg-white/5 border-white/20 text-white rounded-lg flex-1">
+                <SelectValue placeholder="ปี" />
+              </SelectTrigger>
+              <SelectContent>
+                {yearOptions.map((y) => (
+                  <SelectItem key={y} value={String(y)}>
+                    {y}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
+
           {/* Summary card */}
           <div className="bg-white/5 border border-white/10 rounded-2xl p-6 grid grid-cols-2 gap-4">
             <div>
@@ -336,34 +394,34 @@ export default function MainPage() {
             <div className="text-right">
               <p className="text-emerald-400/70 text-xs uppercase tracking-widest">Income</p>
               <p className="text-emerald-400 text-2xl font-bold mt-1">
-                +{activeSummary.income.toLocaleString()}
+                +{summary.income.toLocaleString()}
                 <span className="text-emerald-400/50 text-xs font-normal ml-1">บาท</span>
               </p>
             </div>
             <div>
               <p className="text-red-400/70 text-xs uppercase tracking-widest">Expend</p>
               <p className="text-red-400 text-2xl font-bold mt-1">
-                -{activeSummary.expend.toLocaleString()}
+                -{summary.expend.toLocaleString()}
                 <span className="text-red-400/50 text-xs font-normal ml-1">บาท</span>
               </p>
             </div>
             <div className="text-right">
               <p className="text-white/40 text-xs uppercase tracking-widest">คงเหลือ</p>
-              <p className={`text-2xl font-bold mt-1 ${activeSummary.balance >= 0 ? "text-white" : "text-red-400"}`}>
-                {activeSummary.balance >= 0 ? "+" : ""}{activeSummary.balance.toLocaleString()}
+              <p className={`text-2xl font-bold mt-1 ${summary.balance >= 0 ? "text-white" : "text-red-400"}`}>
+                {summary.balance >= 0 ? "+" : ""}{summary.balance.toLocaleString()}
                 <span className="text-white/40 text-xs font-normal ml-1">บาท</span>
               </p>
             </div>
           </div>
 
           {/* List items */}
-          <div className="flex flex-col gap-2">
-            {!lists || lists.length === 0 ? (
+          <div className="custom-scrollbar flex flex-col gap-2 lg:max-h-[306px] lg:overflow-y-auto lg:pr-1">
+            {allLists.length === 0 ? (
               <div className="border border-white/10 rounded-2xl px-6 py-12 text-center text-white/30 text-sm">
-                ยังไม่มีรายการ — เริ่มบันทึกรายการแรกได้เลย
+                ยังไม่มีรายการในช่วงเวลานี้
               </div>
             ) : (
-              lists.map((item, index) => (
+              visibleLists.map((item, index) => (
                 <div
                   key={item.id}
                   className="bg-white/5 border border-white/10 rounded-xl p-4 flex flex-col gap-3 hover:bg-white/8 hover:border-white/20 transition-all"
@@ -372,7 +430,7 @@ export default function MainPage() {
                   <div className="flex items-center justify-between gap-4">
                     <div className="flex items-center gap-3 min-w-0 flex-1">
                       <span className="text-white/20 text-xs tabular-nums shrink-0">
-                        {index + 1}
+                        {(isMobile ? page * pageSize : 0) + index + 1}
                       </span>
                       {editingId === item.id ? (
                         <Input
@@ -483,6 +541,29 @@ export default function MainPage() {
               ))
             )}
           </div>
+
+          {/* Pagination (mobile) */}
+          {totalPages > 1 && (
+            <div className="flex lg:hidden items-center justify-center gap-4 pt-1">
+              <button
+                onClick={() => setPage((p) => Math.max(0, p - 1))}
+                disabled={page === 0}
+                className="h-9 w-9 rounded-lg border border-white/20 text-white disabled:opacity-30 hover:bg-white/10 transition-colors"
+              >
+                ‹
+              </button>
+              <span className="text-white/60 text-sm tabular-nums">
+                {page + 1} / {totalPages}
+              </span>
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                disabled={page >= totalPages - 1}
+                className="h-9 w-9 rounded-lg border border-white/20 text-white disabled:opacity-30 hover:bg-white/10 transition-colors"
+              >
+                ›
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
