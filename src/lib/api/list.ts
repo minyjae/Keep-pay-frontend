@@ -24,3 +24,11 @@ export async function getSummary(): Promise<ListSummary> {
   const res = await api.get("/api/lists/summary");
   return res.data?.data ?? res.data;
 }
+export async function getWeekSummary(): Promise<ListSummary> {
+  const res = await api.get("/api/lists/summary/week");
+  return res.data?.data ?? res.data;
+}
+export async function getMonthSummary(): Promise<ListSummary> {
+  const res = await api.get("/api/lists/summary/month");
+  return res.data?.data ?? res.data;
+}

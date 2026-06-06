@@ -6,7 +6,7 @@ import { AxiosError } from "axios";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { getUser } from "@/lib/api/user";
-import { createList, getListUser, updateList, deleteList, getSummary } from "@/lib/api/list";
+import { createList, getListUser, updateList, deleteList, getSummary, getWeekSummary, getMonthSummary } from "@/lib/api/list";
 import { getTypes } from "@/lib/api/type";
 import { clearAuthToken } from "@/lib/axios";
 import type { UserResponse } from "@/lib/types/user";
@@ -28,6 +28,9 @@ export default function MainPage() {
   const [user, setUser] = useState<UserResponse | null>(null);
   const [lists, setLists] = useState<ListResponse[] | null>(null);
   const [summary, setSummary] = useState<ListSummary>({ income: 0, expend: 0, balance: 0 });
+  const [weekSummary, setWeekSummary] = useState<ListSummary>({ income: 0, expend: 0, balance: 0 });
+  const [monthSummary, setMonthSummary] = useState<ListSummary>({ income: 0, expend: 0, balance: 0 });
+  const [period, setPeriod] = useState<"all" | "week" | "month">("all");
   const [loadingUser, setLoadingUser] = useState<boolean>(true);
   const [userError, setUserError] = useState<string | null>(null);
 
@@ -51,11 +54,14 @@ export default function MainPage() {
   useEffect(() => {
     const fetchUser = async () => {
       try {
-        const [data, list, typeList, summaryData] = await Promise.all([getUser(), getListUser(), getTypes(), getSummary()]);
+        const [data, list, typeList, summaryData, summaryWeekData, summaryMonthData] = await Promise.all([getUser(), getListUser(), getTypes(), getSummary(), getWeekSummary(), getMonthSummary()]);
         setUser(data);
         setLists(list);
         setTypes(typeList);
         setSummary(summaryData);
+        setWeekSummary(summaryWeekData);
+        setMonthSummary(summaryMonthData);
+        console.log("summary all:", summaryData, "week:", summaryWeekData, "month:", summaryMonthData);
         if (typeList.length > 0) setTypeId(typeList[0].id);
       } catch (err) {
         if (err instanceof AxiosError && err.response?.status === 401) {
@@ -73,6 +79,8 @@ export default function MainPage() {
 
   const refreshSummary = (): void => {
     getSummary().then(setSummary).catch(() => {});
+    getWeekSummary().then(setWeekSummary).catch(() => {});
+    getMonthSummary().then(setMonthSummary).catch(() => {});
   };
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
@@ -176,6 +184,9 @@ export default function MainPage() {
       </div>
     );
   }
+
+  const activeSummary =
+    period === "week" ? weekSummary : period === "month" ? monthSummary : summary;
 
   return (
     <div className="min-h-screen bg-black">
@@ -297,6 +308,25 @@ export default function MainPage() {
 
         {/* Right: Summary + List */}
         <div className="flex flex-col gap-4">
+          <div className="flex gap-2">
+            {([
+              { key: "all", label: "ทั้งหมด" },
+              { key: "week", label: "สัปดาห์" },
+              { key: "month", label: "เดือน" },
+            ] as const).map((opt) => (
+              <button
+                key={opt.key}
+                onClick={() => setPeriod(opt.key)}
+                className={`text-sm px-4 py-1.5 rounded-lg border transition-colors ${
+                  period === opt.key
+                    ? "bg-white text-black border-white font-semibold"
+                    : "text-white/60 border-white/20 hover:bg-white/10"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
           {/* Summary card */}
           <div className="bg-white/5 border border-white/10 rounded-2xl p-6 grid grid-cols-2 gap-4">
             <div>
@@ -306,21 +336,21 @@ export default function MainPage() {
             <div className="text-right">
               <p className="text-emerald-400/70 text-xs uppercase tracking-widest">Income</p>
               <p className="text-emerald-400 text-2xl font-bold mt-1">
-                +{summary.income.toLocaleString()}
+                +{activeSummary.income.toLocaleString()}
                 <span className="text-emerald-400/50 text-xs font-normal ml-1">บาท</span>
               </p>
             </div>
             <div>
               <p className="text-red-400/70 text-xs uppercase tracking-widest">Expend</p>
               <p className="text-red-400 text-2xl font-bold mt-1">
-                -{summary.expend.toLocaleString()}
+                -{activeSummary.expend.toLocaleString()}
                 <span className="text-red-400/50 text-xs font-normal ml-1">บาท</span>
               </p>
             </div>
             <div className="text-right">
               <p className="text-white/40 text-xs uppercase tracking-widest">คงเหลือ</p>
-              <p className={`text-2xl font-bold mt-1 ${summary.balance >= 0 ? "text-white" : "text-red-400"}`}>
-                {summary.balance >= 0 ? "+" : ""}{summary.balance.toLocaleString()}
+              <p className={`text-2xl font-bold mt-1 ${activeSummary.balance >= 0 ? "text-white" : "text-red-400"}`}>
+                {activeSummary.balance >= 0 ? "+" : ""}{activeSummary.balance.toLocaleString()}
                 <span className="text-white/40 text-xs font-normal ml-1">บาท</span>
               </p>
             </div>
