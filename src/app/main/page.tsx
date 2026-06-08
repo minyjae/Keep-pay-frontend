@@ -227,6 +227,11 @@ export default function MainPage() {
       <Navbar
         buttons={[
           {
+            label: "Dashboard",
+            path: "/dashboard",
+            variant: "outline",
+          },
+          {
             label: "Logout",
             path: "/",
             variant: "outline",
