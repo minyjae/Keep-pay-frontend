@@ -1,36 +1,67 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Keep Pay Frontend
 
-## Getting Started
+โปรเจกต์นี้เป็นเว็บแอปหน้าจอสำหรับระบบจัดการการเงิน/บัญชีผู้ใช้ พัฒนาด้วย **Next.js 16**, **React 19**, และ **Tailwind CSS 4**.
 
-First, run the development server:
+## คุณสมบัติหลัก
+
+- หน้า `login`, `register`, และ `dashboard`
+- ระบบหน้าจอหลักใน `app/main/page.tsx`
+- UI components แบบโมดูลใน `src/app/components/ui`
+- แผนภูมิและกราฟใน `src/app/components/charts`
+- เชื่อมต่อ API ด้วย `axios`
+- ฟอร์มและ validation ด้วย `react-hook-form` และ `zod`
+
+## โครงสร้างสำคัญของโปรเจกต์
+
+- `app/` - โฟลเดอร์หลักของ Next.js App Router
+  - `globals.css` - สไตล์ระดับแอป
+  - `layout.tsx` - เลย์เอาท์หลัก
+  - `dashboard/page.tsx` - หน้าแดชบอร์ด
+  - `login/page.tsx` - หน้าล็อกอิน
+  - `register/page.tsx` - หน้ารีจิสเตอร์
+  - `main/page.tsx` - หน้าเนื้อหาหลัก
+- `src/app/components/` - คอมโพเนนต์ UI และ chart
+- `src/app/lib/` - ไลบรารีช่วยเหลือ, API client, validations
+- `src/app/types/` - ประเภทข้อมูล TypeScript
+
+## ติดตั้งและรันโปรเจกต์
+
+ใช้คำสั่งต่อไปนี้จากโฟลเดอร์รากของโปรเจกต์:
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+เปิดเว็บที่:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```text
+http://localhost:3000
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## คำสั่งสำคัญ
 
-## Learn More
+- `npm run dev` - รันเซิร์ฟเวอร์พัฒนา
+- `npm run build` - สร้างไฟล์สำหรับ production
+- `npm run start` - รันแอปในโหมด production
 
-To learn more about Next.js, take a look at the following resources:
+## ส่วนประกอบที่ใช้
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- `next` - Next.js
+- `react` / `react-dom` - React
+- `axios` - HTTP client
+- `react-hook-form` - จัดการฟอร์ม
+- `zod` - ตรวจสอบ schema
+- `@radix-ui/react-*` - คอมโพเนนต์ UI ที่นำมาใช้
+- `tailwindcss` และ `@tailwindcss/postcss` - สไตล์
+- `gsap` / `lenis` - แอนิเมชันและการเลื่อน
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## หมายเหตุ
 
-## Deploy on Vercel
+- ตรวจสอบ `src/app/lib/api` สำหรับการเรียกใช้งาน backend API
+- หากต้องการเพิ่มหน้าหรือ component ใหม่ ให้สร้างไฟล์ภายใต้ `src/app/components` หรือ `app/` ตามลำดับ
+- โปรเจกต์นี้ตั้งค่าให้ใช้ **App Router** ของ Next.js
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+---
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+หากต้องการให้ปรับ README เป็นภาษาอังกฤษ หรือเติมส่วนการติดตั้งเพิ่มเติม เช่น `pnpm`/`yarn` บอกได้เลยครับ
